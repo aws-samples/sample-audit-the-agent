@@ -10,7 +10,7 @@
 
 ## Overview
 
-Autonomous AWS AI agents (DevOps Agent, Security Agent) take real actions with real blast radius — creating tickets, running pentests, and interacting with your infrastructure. Security leadership needs daily accountability: a clear view of what these agents did, who authorized it, and what it cost — both before and after approving production use.
+AWS AI agents (DevOps Agent, Security Agent) operate autonomously — and while their actions are bounded by the IAM permissions attached to them, security leadership still has limited day-to-day visibility into what they actually accessed within those permissions. AuditTheAgent closes that gap: a clear daily view of what each agent did, who authorized it, and what it cost — the accountability that supports confident adoption.
 
 AuditTheAgent is a serverless pipeline that generates interactive executive dashboards answering five questions:
 
