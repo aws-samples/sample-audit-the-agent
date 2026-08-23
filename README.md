@@ -10,7 +10,7 @@
 
 ## Overview
 
-AWS AI agents (DevOps Agent, Security Agent) operate autonomously — and while their actions are bounded by the IAM permissions attached to them, security leadership still has limited day-to-day visibility into what they actually accessed within those permissions. AuditTheAgent closes that gap: a clear daily view of what each agent did, who authorized it, and what it cost — the accountability that supports confident adoption.
+AWS AI agents (**DevOps Agent**, **Security Agent**) operate autonomously — and while their actions are bounded by the IAM permissions attached to them, security leadership still has limited day-to-day visibility into what they actually accessed within those permissions. AuditTheAgent closes that gap: a clear daily view of what each agent did, who authorized it, and what it cost — the accountability that supports confident adoption.
 
 AuditTheAgent is a serverless pipeline that generates interactive executive dashboards answering five questions:
 
@@ -25,11 +25,12 @@ AuditTheAgent is a serverless pipeline that generates interactive executive dash
 ### Prerequisites
 
 - AWS SAM CLI installed
-- AWS account with DevOps Agent or Security Agent active
-- A deploy principal with IAM-policy permissions (`iam:PutRolePolicy`,
-  `iam:GetRole`, `iam:CreateRole`). The stack attaches inline policies to its
-  Lambda execution roles, so a PowerUser-only role cannot create/update it and
-  the deploy will fail with `AccessDenied` on the function roles.
+- AWS account with **DevOps Agent** or **Security Agent** active
+- Permission to create IAM roles and policies when you deploy (for example, an
+  administrator role, or a role that includes `iam:CreateRole`, `iam:GetRole`,
+  and `iam:PutRolePolicy`). AuditTheAgent creates least-privilege execution roles
+  for its Lambda functions as part of the stack, so a role without IAM permissions
+  cannot deploy it — the deploy fails with an `AccessDenied` error on the roles.
 - (Optional) CUR configured in Athena for cost attribution
 - (Optional) Enterprise Support for credit tracking
 
@@ -99,11 +100,11 @@ column tells you whether to supply a value or just press Enter.
 | `AthenaWorkgroup` | `primary` | Optional | Athena workgroup for CUR queries. |
 | `EnableUrlShortening` | `false` | Optional | Opt-in TinyURL shortening for presigned report URLs (sends URL to a third party). |
 | `AgentRoleArns` | — | Optional (auto-discovered) | Agent IAM role ARNs. Leave empty to auto-discover. |
-| `VendedLogGroup` | — | Optional (auto-discovered) | DevOps Agent vended-log group. Leave empty to auto-discover. |
+| `VendedLogGroup` | — | Optional (auto-discovered) | **DevOps Agent** vended-log group. Leave empty to auto-discover. |
 | `MonthlyESCharge` | `0` | Optional (fallback) | Fallback ES charge for credit tracking; auto-derived from CUR when available. |
 | `CurCrossAccountRoleArn` | — | Optional (advanced) | IAM role ARN in the CUR account for cross-account queries (see below). |
 
-> Agent space names are resolved automatically from the DevOps Agent API — no
+> Agent space names are resolved automatically from the **DevOps Agent** API — no
 > UUID→name mapping needs to be supplied.
 
 **Changing parameters after deployment** is non-destructive — just run `sam deploy` again with updated values. No data loss or resource recreation.
@@ -235,8 +236,8 @@ See [CROSS_ACCOUNT_SETUP.md](CROSS_ACCOUNT_SETUP.md) for detailed instructions a
 
 | Agent | EventSource | Trigger Events | CUR Product Code |
 |-------|-------------|----------------|-----------------|
-| AWS DevOps Agent | `aidevops.amazonaws.com` | CreateBacklogTask, CreateChat | `DevOpsAgent` |
-| AWS Security Agent | `securityagent.amazonaws.com` | CreatePentest, StartPentestJob | `SecurityAgent` |
+| AWS **DevOps Agent** | `aidevops.amazonaws.com` | CreateBacklogTask, CreateChat | `DevOpsAgent` |
+| AWS **Security Agent** | `securityagent.amazonaws.com` | CreatePentest, StartPentestJob | `SecurityAgent` |
 
 ## Report Features
 
