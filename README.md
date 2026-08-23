@@ -4,7 +4,7 @@
 
 > What did the agent access? Who authorized it? What did it cost? Did anything drift? Should I be concerned?
 
-[![Tests](https://img.shields.io/badge/tests-127%20passing-brightgreen)]() [![Python](https://img.shields.io/badge/python-3.12-blue)]() [![License](https://img.shields.io/badge/license-MIT--0-orange)]()
+[![License: MIT-0](https://img.shields.io/badge/License-MIT--0-yellow.svg)](https://opensource.org/licenses/MIT-0) [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/) [![AWS SAM](https://img.shields.io/badge/AWS-SAM-orange.svg)](https://aws.amazon.com/serverless/sam/)
 
 > **⚠️ Important:** This is sample code for demonstration and educational purposes only. It is not intended for production use without thorough review, testing, and hardening by your organization's security and engineering teams. This solution has not been subjected to a full production security review by AWS. Use at your own risk and validate all outputs before making operational decisions.
 
