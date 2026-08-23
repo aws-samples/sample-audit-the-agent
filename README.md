@@ -10,9 +10,7 @@
 
 ## Overview
 
-AWS AI agents (**DevOps Agent**, **Security Agent**) operate autonomously — and while their actions are bounded by the IAM permissions attached to them, security leadership still has limited day-to-day visibility into what they actually accessed within those permissions. AuditTheAgent closes that gap: a clear daily view of what each agent did, who authorized it, and what it cost — the accountability that supports confident adoption.
-
-AuditTheAgent is a serverless pipeline that generates interactive executive dashboards answering five questions:
+AWS AI agents (**DevOps Agent**, **Security Agent**) operate autonomously. Their actions are bounded by the IAM permissions attached to them, but security leadership still has little day-to-day visibility into what they actually did within those bounds. AuditTheAgent closes that gap with a daily executive report answering five questions:
 
 1. **What did the agent access?** — CloudTrail-sourced, deterministic
 2. **Who authorized it?** — Trigger classification (webhook, console, EventBridge, MCP)
@@ -20,19 +18,23 @@ AuditTheAgent is a serverless pipeline that generates interactive executive dash
 4. **Is it a risk?** — Trust Posture (5 dimensions, rules-based)
 5. **Should I be concerned?** — AI summary with deterministic guardrails
 
+It's a serverless pipeline (Step Functions + Lambda) that runs on a schedule and delivers an interactive dashboard — no agent of its own, just accountability for the agents you already run.
+
 ## Quick Start
 
 ### Prerequisites
 
 - AWS SAM CLI installed
 - AWS account with **DevOps Agent** or **Security Agent** active
-- Permission to create IAM roles and policies when you deploy (for example, an
-  administrator role, or a role that includes `iam:CreateRole`, `iam:GetRole`,
-  and `iam:PutRolePolicy`). AuditTheAgent creates least-privilege execution roles
-  for its Lambda functions as part of the stack, so a role without IAM permissions
-  cannot deploy it — the deploy fails with an `AccessDenied` error on the roles.
-- (Optional) CUR configured in Athena for cost attribution
-- (Optional) Enterprise Support for credit tracking
+- Permission to create IAM roles when you deploy (an admin role, or one with
+  `iam:CreateRole`, `iam:GetRole`, `iam:PutRolePolicy`). The stack creates
+  least-privilege execution roles for its Lambdas, so a role without IAM
+  permissions fails with `AccessDenied`.
+- (Recommended) CUR (Cost & Usage Report) in Athena. It's optional — the tool
+  runs without it — but CUR unlocks the richest cost insights: per-space and
+  per-operation attribution plus credit-burn tracking. The Enterprise Support
+  charge behind the credit budget is read from CUR automatically; no separate
+  input needed.
 
 ### Deploy
 
@@ -70,7 +72,7 @@ aws s3 ls s3://agentaudit-results-$(aws sts get-caller-identity --query Account 
 
 ![AuditTheAgent Architecture](architecture.png)
 
-**Pipeline:** EventBridge (daily) → Step Functions → 7 Lambda functions → S3 + SNS
+**Pipeline:** EventBridge (daily) → Step Functions → 8 Lambda functions → S3 + SNS
 
 **Data Sources (validated, deterministic):**
 | Source | What It Provides | Function |
@@ -111,102 +113,7 @@ column tells you whether to supply a value or just press Enter.
 
 ### Cross-Account CUR Setup
 
-Most enterprises keep CUR in the **payer/management account** while agents run in linked accounts. To enable cross-account cost queries, deploy the following role in the account where CUR/Athena resides:
-
-```yaml
-AWSTemplateFormatVersion: '2010-09-09'
-Description: AuditTheAgent - Cross-account CUR read-only role (deploy in payer/CUR account)
-
-Parameters:
-  AgentAuditAccountId:
-    Type: String
-    Description: Account ID where AuditTheAgent is deployed
-
-  CurDatabaseName:
-    Type: String
-    Default: cur_db
-    Description: Athena database containing CUR table
-
-  CurSourceBucketName:
-    Type: String
-    Description: S3 bucket with CUR Parquet data
-
-  AthenaOutputBucketName:
-    Type: String
-    Description: S3 bucket for Athena query results
-
-Resources:
-  AgentAuditCURRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: AgentAudit-CUR-ReadOnly
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              AWS: !Sub 'arn:aws:iam::${AgentAuditAccountId}:root'
-            Action: sts:AssumeRole
-            Condition:
-              StringLike:
-                aws:PrincipalArn: !Sub 'arn:aws:iam::${AgentAuditAccountId}:role/agentaudit-*'
-      Policies:
-        - PolicyName: AthenaQueryExecution
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - athena:StartQueryExecution
-                  - athena:GetQueryExecution
-                  - athena:GetQueryResults
-                  - athena:StopQueryExecution
-                Resource: !Sub 'arn:aws:athena:${AWS::Region}:${AWS::AccountId}:workgroup/primary'
-        - PolicyName: GlueCatalogAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - glue:GetTable
-                  - glue:GetDatabase
-                  - glue:GetPartitions
-                Resource:
-                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog'
-                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/${CurDatabaseName}'
-                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/${CurDatabaseName}/*'
-        - PolicyName: S3ReadCurData
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:ListBucket
-                Resource:
-                  - !Sub 'arn:aws:s3:::${CurSourceBucketName}'
-                  - !Sub 'arn:aws:s3:::${CurSourceBucketName}/*'
-        - PolicyName: S3WriteQueryResults
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:GetObject
-                Resource:
-                  - !Sub 'arn:aws:s3:::${AthenaOutputBucketName}/agentaudit-queries/*'
-              - Effect: Allow
-                Action:
-                  - s3:GetBucketLocation
-                Resource:
-                  - !Sub 'arn:aws:s3:::${AthenaOutputBucketName}'
-
-Outputs:
-  RoleArn:
-    Description: Use this value for the CurCrossAccountRoleArn parameter in AuditTheAgent
-    Value: !GetAtt AgentAuditCURRole.Arn
-```
+Most enterprises keep CUR in the **payer/management account** while agents run in linked accounts. To enable cross-account cost queries, deploy the included `cross-account-role.yaml` in the account where CUR/Athena lives — it creates a read-only role AuditTheAgent can assume.
 
 **Deploy in your CUR account:**
 ```bash
@@ -221,16 +128,24 @@ aws cloudformation deploy \
     AthenaOutputBucketName=<YOUR_ATHENA_RESULTS_BUCKET>
 ```
 
-Then redeploy AuditTheAgent with the role ARN from the stack output:
+Then re-feed the role ARN into AuditTheAgent. First grab it from the stack output:
+
 ```bash
-sam deploy --parameter-overrides \
-  "CurCrossAccountRoleArn=arn:aws:iam::<CUR_ACCOUNT>:role/AgentAudit-CUR-ReadOnly" \
-  "CurDatabase=<YOUR_CUR_DATABASE>" \
-  "CurTable=<YOUR_CUR_TABLE>" \
-  ...
+aws cloudformation describe-stacks --stack-name agentaudit-cur-access \
+  --query 'Stacks[0].Outputs[?OutputKey==`RoleArn`].OutputValue' --output text
 ```
 
-See [CROSS_ACCOUNT_SETUP.md](CROSS_ACCOUNT_SETUP.md) for detailed instructions and troubleshooting.
+Then re-run guided deploy in your AuditTheAgent account and set `CurCrossAccountRoleArn` to that ARN (along with `CurDatabase` / `CurTable`) when prompted:
+
+```bash
+sam deploy --guided
+```
+
+The Enrich Lambda then assumes this role to query CUR cross-account; leave the parameter empty and it queries Athena in its own account instead. The role is read-only (Athena + Glue + CUR bucket), and its trust policy only allows AuditTheAgent's own roles in your account to assume it.
+
+> Use `--guided` (or edit `samconfig.toml`) for the re-feed rather than
+> `--parameter-overrides` — the shorthand splits on spaces and can truncate other
+> parameters like `rate(1 day)`.
 
 ## Supported Agents
 
@@ -244,7 +159,7 @@ See [CROSS_ACCOUNT_SETUP.md](CROSS_ACCOUNT_SETUP.md) for detailed instructions a
 ![AuditTheAgent Report](demo.gif)
 
 - **KPI Cards** — Risk level, task count, credit %, burn rate at a glance
-- **Agent Space Cost Breakdown** — Per-space usage cost across all agents, highest spend first. **Usage Cost** is the actual (unblended) cost; **% of Credit Budget** shows each DevOps space's share of the org-wide DevOps Agent credit budget (75% of monthly ES charge, consolidated billing) to surface the biggest credit-burn drivers. Credits are DevOps-Agent-only, so Security Agent spaces show **N/A**. A **Tags** column shows each space's own purpose/grouping labels (application, environment, on-call team) from its Agent Space configuration (`aws:*` excluded).
+- **Agent Space Cost Breakdown** — Per-space usage cost across all agents, highest spend first. **Usage Cost** is the actual (unblended) cost; **% of Credit Budget** shows each DevOps space's share of the org-wide **DevOps Agent** credit budget (75% of monthly ES charge, consolidated billing) to surface the biggest credit-burn drivers. Credits are DevOps-Agent-only, so **Security Agent** spaces show **N/A**. A **Tags** column shows each space's own purpose/grouping labels (application, environment, on-call team) from its Agent Space configuration (`aws:*` excluded).
 - **Trust Posture** — 5 dimensions with visual risk bars (capability, permissions, visibility, integrations, human approval)
 - **Credit Consumption** — Progress bar, burn rate, projection, days until exhaustion
 - **Activity Table** — Filterable, paginated (25/page), searchable
@@ -270,7 +185,7 @@ pip install -r requirements-dev.txt
 python3 -m pytest tests/ -v
 ```
 
-61 tests covering: trigger classification, CloudTrail parsing, CUR partition logic, credit consumption math, guardrail filters, HTML generation, XSS prevention.
+127 tests covering: trigger classification, CloudTrail parsing, CUR partition logic, credit consumption math, guardrail filters, HTML generation, XSS prevention.
 
 ## Security
 
@@ -292,20 +207,21 @@ For estimates specific to your usage, see the [AWS Pricing Calculator](https://c
 ## Project Structure
 
 ```
-agentaudit/
+sample-audit-the-agent/
 ├── functions/
+│   ├── discover/        Auto-detect spaces, log groups, roles
 │   ├── collect/         CloudTrail events, trigger classification
 │   ├── enrich/          CUR/Athena cost, ES credit detection
 │   ├── compliance/      Trust Posture (5 dimensions)
 │   ├── aggregate/       Merge pipeline data
 │   ├── analyze/         Bedrock summary + guardrails
 │   ├── report/          HTML dashboard + SNS + S3
-│   └── discover/        Auto-detect spaces, log groups, roles
+│   └── feedback/        Reviewed-CSV ingestion (suppressions)
 ├── statemachine/        Step Functions ASL definition
-├── tests/               61 pytest tests
+├── tests/               127 pytest tests
 ├── template.yaml        SAM/CloudFormation template
-├── architecture.png     Architecture diagram
-└── DATA_SOURCES.md      Validated data source reference
+├── cross-account-role.yaml   Cross-account CUR read-only role
+└── architecture.png     Architecture diagram
 ```
 
 ## License
