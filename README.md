@@ -10,13 +10,13 @@
 
 ## Overview
 
-Organizations adopting AWS AI agents (DevOps Agent, Security Agent) face a trust gap: security leadership needs daily visibility into what autonomous agents are doing before approving production deployment.
+Autonomous AWS AI agents (DevOps Agent, Security Agent) take real actions with real blast radius — creating tickets, running pentests, and interacting with your infrastructure. Security leadership needs daily accountability: a clear view of what these agents did, who authorized it, and what it cost — both before and after approving production use.
 
 AuditTheAgent is a serverless pipeline that generates interactive executive dashboards answering five questions:
 
 1. **What did the agent access?** — CloudTrail-sourced, deterministic
 2. **Who authorized it?** — Trigger classification (webhook, console, EventBridge, MCP)
-3. **What did it cost?** — CUR-first, per-space, per-operation, credit burn tracking
+3. **What did it cost?** — CUR-first, per-space and per-operation, with credit-burn tracking
 4. **Is it a risk?** — Trust Posture (5 dimensions, rules-based)
 5. **Should I be concerned?** — AI summary with deterministic guardrails
 
@@ -67,7 +67,7 @@ aws s3 ls s3://agentaudit-results-$(aws sts get-caller-identity --query Account 
 
 ## Architecture
 
-![AgentAudit Architecture](architecture.png)
+![AuditTheAgent Architecture](architecture.png)
 
 **Pipeline:** EventBridge (daily) → Step Functions → 7 Lambda functions → S3 + SNS
 
