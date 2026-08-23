@@ -2,7 +2,7 @@
 
 **Auditing the agent, not building another one.**
 
-> What did the agent access? Who authorized it? What did it cost? Did anything drift? Should I be concerned?
+> What did the agent access? Who authorized it? What did it cost? Is it a risk? Should I be concerned?
 
 [![License: MIT-0](https://img.shields.io/badge/License-MIT--0-yellow.svg)](https://opensource.org/licenses/MIT-0) [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/) [![AWS SAM](https://img.shields.io/badge/AWS-SAM-orange.svg)](https://aws.amazon.com/serverless/sam/)
 
