@@ -199,7 +199,7 @@ python3 -m pytest tests/ -v
 Rough estimate, ~$1-3 per daily report (based on AWS public pricing as of August 2026, us-east-1; actual costs vary by region, usage, and data volume):
 - Bedrock invocation: ~$0.01-0.05
 - Athena queries: ~$0.01 (CUR scans)
-- Lambda: ~$0.01 (7 functions, <30s each)
+- Lambda: ~$0.01 (8 functions, <30s each)
 - S3/SNS: negligible
 
 For estimates specific to your usage, see the [AWS Pricing Calculator](https://calculator.aws/).
