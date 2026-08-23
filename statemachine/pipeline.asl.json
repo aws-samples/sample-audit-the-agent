@@ -1,0 +1,47 @@
+{
+  "Comment": "AgentAudit Pipeline — Daily agent activity audit report",
+  "StartAt": "Discover",
+  "States": {
+    "Discover": {
+      "Type": "Task",
+      "Resource": "${DiscoverFunctionArn}",
+      "ResultPath": "$.discover",
+      "Next": "Collect"
+    },
+    "Collect": {
+      "Type": "Task",
+      "Resource": "${CollectFunctionArn}",
+      "ResultPath": "$.collect",
+      "Next": "Enrich"
+    },
+    "Enrich": {
+      "Type": "Task",
+      "Resource": "${EnrichFunctionArn}",
+      "ResultPath": "$.enrich",
+      "Next": "Compliance"
+    },
+    "Compliance": {
+      "Type": "Task",
+      "Resource": "${ComplianceFunctionArn}",
+      "ResultPath": "$.compliance",
+      "Next": "Aggregate"
+    },
+    "Aggregate": {
+      "Type": "Task",
+      "Resource": "${AggregateFunctionArn}",
+      "ResultPath": "$.aggregate",
+      "Next": "Analyze"
+    },
+    "Analyze": {
+      "Type": "Task",
+      "Resource": "${AnalyzeFunctionArn}",
+      "ResultPath": "$.analyze",
+      "Next": "Report"
+    },
+    "Report": {
+      "Type": "Task",
+      "Resource": "${ReportFunctionArn}",
+      "End": true
+    }
+  }
+}

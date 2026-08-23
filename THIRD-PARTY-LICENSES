@@ -1,0 +1,21 @@
+Third-Party Dependencies
+========================
+
+This project uses the following third-party libraries and services:
+
+1. boto3 (AWS SDK for Python)
+   - License: Apache License 2.0
+   - URL: https://github.com/boto/boto3
+   - Note: Provided by the AWS Lambda Python runtime; not bundled with this project.
+
+2. botocore
+   - License: Apache License 2.0
+   - URL: https://github.com/boto/botocore
+   - Note: Provided by the AWS Lambda Python runtime; not bundled with this project.
+
+3. TinyURL (URL shortening service)
+   - URL: https://tinyurl.com
+   - Usage: Shortens presigned S3 URLs for email delivery (prevents line-wrap breakage)
+   - Data sent: Presigned S3 URL (temporary, 8-hour expiry)
+   - Fallback: Full presigned URL used if service unavailable
+   - Note: No authentication required. No customer data sent (only temporary S3 URL).

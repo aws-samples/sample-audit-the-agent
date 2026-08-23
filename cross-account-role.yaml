@@ -1,0 +1,105 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  AuditTheAgent - Cross-account CUR read-only role.
+  Deploy this template in the account where CUR/Athena resides (typically the payer/management account).
+  It grants the AuditTheAgent Enrich Lambda in your linked account permission to query CUR via Athena.
+
+Parameters:
+  AgentAuditAccountId:
+    Type: String
+    Description: 12-digit AWS account ID where AuditTheAgent is deployed
+
+  CurDatabaseName:
+    Type: String
+    Default: cur_db
+    Description: Athena database name containing the CUR table
+
+  CurSourceBucketName:
+    Type: String
+    Description: S3 bucket where CUR Parquet data is stored
+
+  AthenaOutputBucketName:
+    Type: String
+    Description: S3 bucket for Athena query results
+
+  AthenaWorkgroup:
+    Type: String
+    Default: primary
+    Description: Athena workgroup to use for queries
+
+Resources:
+  AgentAuditCURRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AgentAudit-CUR-ReadOnly
+      Description: Allows AuditTheAgent Enrich Lambda to query CUR data via Athena (read-only)
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AgentAuditAccountId}:root'
+            Action: sts:AssumeRole
+            Condition:
+              StringLike:
+                aws:PrincipalArn: !Sub 'arn:aws:iam::${AgentAuditAccountId}:role/agentaudit-*'
+      Policies:
+        - PolicyName: AthenaQueryExecution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - athena:StartQueryExecution
+                  - athena:GetQueryExecution
+                  - athena:GetQueryResults
+                  - athena:StopQueryExecution
+                Resource: !Sub 'arn:aws:athena:${AWS::Region}:${AWS::AccountId}:workgroup/${AthenaWorkgroup}'
+        - PolicyName: GlueCatalogAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - glue:GetTable
+                  - glue:GetDatabase
+                  - glue:GetPartitions
+                Resource:
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/${CurDatabaseName}'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/${CurDatabaseName}/*'
+        - PolicyName: S3ReadCurData
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${CurSourceBucketName}'
+                  - !Sub 'arn:aws:s3:::${CurSourceBucketName}/*'
+        - PolicyName: S3WriteQueryResults
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource:
+                  - !Sub 'arn:aws:s3:::${AthenaOutputBucketName}/agentaudit-queries/*'
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                Resource:
+                  - !Sub 'arn:aws:s3:::${AthenaOutputBucketName}'
+
+Outputs:
+  RoleArn:
+    Description: Use this value for the CurCrossAccountRoleArn parameter when deploying AuditTheAgent
+    Value: !GetAtt AgentAuditCURRole.Arn
+  DeployCommand:
+    Description: Run this in your AuditTheAgent account to enable cross-account CUR
+    Value: !Sub |
+      sam deploy --parameter-overrides "CurCrossAccountRoleArn=${AgentAuditCURRole.Arn}" "CurDatabase=${CurDatabaseName}" ...

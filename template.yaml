@@ -1,0 +1,388 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: AgentAudit — Daily executive audit reports for AWS-native AI agents
+
+Parameters:
+  NotificationEmail:
+    Type: String
+    Default: ''
+    Description: '[RECOMMENDED] Email for daily report delivery via SNS. Without it, reports are written to S3 only.'
+  AgentTypes:
+    Type: String
+    Default: 'devops'
+    AllowedValues:
+      - devops
+      - security
+      - both
+    Description: '[OPTIONAL — default: devops] Which agent(s) to audit: devops (AWS DevOps Agent), security (AWS Security Agent), or both.'
+  AgentRoleArns:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: '[OPTIONAL — auto-discovered if empty] Comma-separated IAM role ARNs used by agents. Leave empty to auto-discover.'
+  BedrockModelId:
+    Type: String
+    Default: us.anthropic.claude-sonnet-4-6
+    Description: '[OPTIONAL — default: Claude Sonnet] Bedrock model for executive summary generation.'
+  ScheduleExpression:
+    Type: String
+    Default: rate(1 day)
+    Description: '[OPTIONAL — default: daily] Report generation frequency (EventBridge schedule expression).'
+  VendedLogGroup:
+    Type: String
+    Default: ''
+    Description: '[OPTIONAL — auto-discovered if empty] CloudWatch log group for DevOps Agent vended logs. Leave empty to auto-discover.'
+  MonthlyESCharge:
+    Type: String
+    Default: '0'
+    Description: '[OPTIONAL — auto-detected from CUR; fallback only] Monthly Enterprise Support charge ($) for credit tracking. Auto-derived from CUR when available; set only if CUR is not configured. Credits = 75% of this value.'
+  CurDatabase:
+    Type: String
+    Default: ''
+    Description: '[RECOMMENDED — enables per-space cost & credit tracking] Athena database containing the CUR table (e.g., "athenacurcfn_c_u_r"). Leave empty to fall back to Cost Explorer.'
+  CurTable:
+    Type: String
+    Default: ''
+    Description: '[RECOMMENDED — enables per-space cost & credit tracking] CUR table name in Athena (e.g., "cur"). Leave empty to fall back to Cost Explorer.'
+  AthenaOutputBucket:
+    Type: String
+    Default: ''
+    Description: '[RECOMMENDED — enables per-space cost & credit tracking] S3 bucket for Athena query results (e.g., "aws-athena-query-results-ACCOUNT-REGION"). Leave empty to fall back to Cost Explorer.'
+  CurSourceBucket:
+    Type: String
+    Default: ''
+    Description: '[RECOMMENDED — enables per-space cost & credit tracking] S3 bucket where CUR Parquet data is stored; Athena reads it from here. Leave empty if CUR is not configured.'
+  AthenaWorkgroup:
+    Type: String
+    Default: 'primary'
+    Description: '[OPTIONAL — default: primary] Athena workgroup for CUR queries.'
+  CurCrossAccountRoleArn:
+    Type: String
+    Default: ''
+    Description: '[OPTIONAL — advanced] IAM role ARN in the CUR/payer account that Enrich assumes for cross-account Athena queries. Only needed if CUR is in a different account. See CROSS_ACCOUNT_SETUP.md.'
+  EnableUrlShortening:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: '[OPTIONAL — default: off] Shorten presigned report URLs via TinyURL for email readability. Enabling sends the presigned URL to a third-party service.'
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 300
+    MemorySize: 512
+    Environment:
+      Variables:
+        RESULTS_BUCKET: !Ref ResultsBucket
+        AGENT_TYPES: !Ref AgentTypes
+        AGENT_ROLE_ARNS: !Join [',', !Ref AgentRoleArns]
+        BEDROCK_MODEL_ID: !Ref BedrockModelId
+        VENDED_LOG_GROUP: !Ref VendedLogGroup
+        MONTHLY_ES_CHARGE: !Ref MonthlyESCharge
+        CUR_DATABASE: !Ref CurDatabase
+        CUR_TABLE: !Ref CurTable
+        ATHENA_OUTPUT_BUCKET: !Ref AthenaOutputBucket
+        ATHENA_WORKGROUP: !Ref AthenaWorkgroup
+        REGION: !Ref AWS::Region
+
+Resources:
+  ResultsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub agentaudit-results-${AWS::AccountId}
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LoggingConfiguration:
+        LogFilePrefix: access-logs/
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireReports
+            Status: Enabled
+            ExpirationInDays: 90
+
+  ReportTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      KmsMasterKeyId: alias/aws/sns
+      TopicName: agentaudit-reports
+
+  EmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasEmail
+    Properties:
+      TopicArn: !Ref ReportTopic
+      Protocol: email
+      Endpoint: !Ref NotificationEmail
+
+  DiscoverFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.handler
+      CodeUri: functions/discover/
+      Timeout: 120
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - iam:ListRoles
+                - iam:GetRole
+              Resource: '*'
+
+  CollectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.handler
+      CodeUri: functions/collect/
+      Timeout: 600
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cloudtrail:LookupEvents
+                - cloudtrail:GetQueryResults
+                - cloudtrail:StartQuery
+                - logs:DescribeLogGroups
+                - logs:StartQuery
+                - logs:GetQueryResults
+              Resource: '*'
+
+  EnrichFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.handler
+      CodeUri: functions/enrich/
+      Timeout: 120
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cloudwatch:GetMetricData
+                - cloudwatch:ListMetrics
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - athena:StartQueryExecution
+                - athena:GetQueryExecution
+                - athena:GetQueryResults
+              Resource:
+                - !Sub 'arn:aws:athena:${AWS::Region}:${AWS::AccountId}:workgroup/${AthenaWorkgroup}'
+            - Effect: Allow
+              Action:
+                - glue:GetTable
+                - glue:GetDatabase
+                - glue:GetPartitions
+              Resource:
+                - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog'
+                - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/${CurDatabase}'
+                - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/${CurDatabase}/*'
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:ListBucket
+              Resource:
+                - !Sub 'arn:aws:s3:::${AthenaOutputBucket}'
+                - !Sub 'arn:aws:s3:::${AthenaOutputBucket}/*'
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:ListBucket
+              Resource:
+                - !Sub 'arn:aws:s3:::${CurSourceBucket}'
+                - !Sub 'arn:aws:s3:::${CurSourceBucket}/*'
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetBucketLocation
+              Resource:
+                - !Sub 'arn:aws:s3:::${AthenaOutputBucket}'
+                - !Sub 'arn:aws:s3:::${AthenaOutputBucket}/agentaudit-queries/*'
+            - Effect: Allow
+              Action:
+                - ce:GetCostAndUsage
+              Resource: '*'
+            - !If
+              - HasCurCrossAccountRole
+              - Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                Resource: !Ref CurCrossAccountRoleArn
+              - !Ref AWS::NoValue
+      Environment:
+        Variables:
+          CUR_CROSS_ACCOUNT_ROLE_ARN: !Ref CurCrossAccountRoleArn
+
+  ComplianceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.handler
+      CodeUri: functions/compliance/
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - iam:ListRoles
+                - iam:ListRolePolicies
+                - iam:ListAttachedRolePolicies
+                - iam:GetRolePolicy
+                - iam:GetPolicy
+                - iam:GetPolicyVersion
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - aidevops:DescribePrivateConnection
+                - aidevops:ListPrivateConnections
+                - aidevops:ListAgentSpaces
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: !Sub ${ResultsBucket.Arn}/agentaudit/config/suppressions.json
+
+  AggregateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.handler
+      CodeUri: functions/aggregate/
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - aidevops:ListAgentSpaces
+                - aidevops:GetAgentSpace
+              Resource: '*'
+
+  AnalyzeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.handler
+      CodeUri: functions/analyze/
+      Timeout: 600
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - 'arn:aws:bedrock:*::foundation-model/*'
+                - 'arn:aws:bedrock:*::inference-profile/*'
+                - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*'
+
+  ReportFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.handler
+      CodeUri: functions/report/
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+              Resource: !Sub ${ResultsBucket.Arn}/*
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: !Ref ReportTopic
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref ReportTopic
+          ENABLE_URL_SHORTENING: !Ref EnableUrlShortening
+
+  FeedbackFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.handler
+      CodeUri: functions/feedback/
+      Timeout: 60
+      # Bucket referenced by literal name/ARN (not !Ref/!GetAtt) to avoid a
+      # circular dependency: the S3 event makes the bucket depend on this
+      # function, so this function must not depend back on the bucket resource.
+      Environment:
+        Variables:
+          RESULTS_BUCKET: !Sub agentaudit-results-${AWS::AccountId}
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: !Sub arn:aws:s3:::agentaudit-results-${AWS::AccountId}/agentaudit/config/review-inbox/*
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+              Resource: !Sub arn:aws:s3:::agentaudit-results-${AWS::AccountId}/agentaudit/config/suppressions.json
+      Events:
+        ReviewedCsvUpload:
+          Type: S3
+          Properties:
+            Bucket: !Ref ResultsBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: agentaudit/config/review-inbox/
+                  - Name: suffix
+                    Value: .reviewed.csv
+
+  AuditPipeline:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: agentaudit-pipeline
+      DefinitionUri: statemachine/pipeline.asl.json
+      DefinitionSubstitutions:
+        DiscoverFunctionArn: !GetAtt DiscoverFunction.Arn
+        CollectFunctionArn: !GetAtt CollectFunction.Arn
+        EnrichFunctionArn: !GetAtt EnrichFunction.Arn
+        ComplianceFunctionArn: !GetAtt ComplianceFunction.Arn
+        AggregateFunctionArn: !GetAtt AggregateFunction.Arn
+        AnalyzeFunctionArn: !GetAtt AnalyzeFunction.Arn
+        ReportFunctionArn: !GetAtt ReportFunction.Arn
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref DiscoverFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref CollectFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref EnrichFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ComplianceFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref AggregateFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref AnalyzeFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ReportFunction
+      Events:
+        DailySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref ScheduleExpression
+
+  PipelineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/states/agentaudit-pipeline
+      RetentionInDays: 30
+      # CloudWatch Logs encrypts data at rest by default using AWS-owned keys.
+      # KmsKeyId can be added for customer-managed CMK if required by compliance policy.
+
+Conditions:
+  HasEmail: !Not [!Equals [!Ref NotificationEmail, '']]
+  HasCurCrossAccountRole: !Not [!Equals [!Ref CurCrossAccountRoleArn, '']]
+
+Outputs:
+  StateMachineArn:
+    Value: !Ref AuditPipeline
+  ResultsBucketName:
+    Value: !Ref ResultsBucket
+  ReportTopicArn:
+    Value: !Ref ReportTopic
