@@ -279,7 +279,7 @@ def _build_credit_section(credits: dict) -> str:
                 <span class="chevron" id="chevron-credits">▼</span>
             </div>
             <div class="section-body" id="body-credits">
-                <p class="muted">Credit tracking not configured. Set <code>MonthlyESCharge</code> parameter to enable.</p>
+                <p class="muted">No credit budget to track this period. The budget is 75% of your prior-month Enterprise Support charge, derived automatically from CUR — this shows $0 when CUR isn't configured, when no <code>AWSSupportEnterprise</code> charge exists in the prior month, or when CUR data hasn't landed yet (~24h latency). To set a budget explicitly instead, provide the <code>MonthlyESCharge</code> parameter.</p>
             </div>
         </div>'''
 
