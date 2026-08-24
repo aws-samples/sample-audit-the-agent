@@ -380,9 +380,7 @@ def _enrich_via_cur(athena_client: object, period_start: datetime, period_end: d
         line_item_usage_account_id,
         line_item_usage_type,
         SUM(line_item_usage_amount) AS total_hours,
-        SUM(line_item_unblended_cost) AS gross_cost,
-        SUM(line_item_net_unblended_cost) AS net_cost,
-        SUM(discount_total_discount) AS total_discount
+        SUM(line_item_unblended_cost) AS gross_cost
     FROM {CUR_TABLE}
     WHERE line_item_product_code = '{product_code}'
         AND line_item_line_item_type = 'Usage'
@@ -443,29 +441,24 @@ def _enrich_via_cur(athena_client: object, period_start: datetime, period_end: d
                 'operations': {},
                 'total_hours': 0,
                 'gross_cost': 0,
-                'net_cost': 0,
             }
 
         operation = row.get('line_item_operation', 'UNKNOWN')
         hours = float(row.get('total_hours', 0))
         gross = float(row.get('gross_cost', 0))
-        net = float(row.get('net_cost', 0))
 
         spaces[space_uuid]['operations'][operation] = {
             'hours': round(hours, 4),
             'gross_cost': round(gross, 2),
-            'net_cost': round(net, 2),
             'usage_type': row.get('line_item_usage_type', ''),
         }
         spaces[space_uuid]['total_hours'] += hours
         spaces[space_uuid]['gross_cost'] += gross
-        spaces[space_uuid]['net_cost'] += net
 
     # Round totals
     for space in spaces.values():
         space['total_hours'] = round(space['total_hours'], 4)
         space['gross_cost'] = round(space['gross_cost'], 2)
-        space['net_cost'] = round(space['net_cost'], 2)
 
     # Credits summary
     total_credits = 0
@@ -491,7 +484,6 @@ def _enrich_via_cur(athena_client: object, period_start: datetime, period_end: d
 
     # Totals
     total_gross = sum(s['gross_cost'] for s in spaces.values())
-    total_net = sum(s['net_cost'] for s in spaces.values())
     total_hours = sum(s['total_hours'] for s in spaces.values())
 
     return {
@@ -502,7 +494,6 @@ def _enrich_via_cur(athena_client: object, period_start: datetime, period_end: d
             'total_hours': round(total_hours, 4),
             'total_agent_seconds': round(total_hours * 3600, 1),
             'gross_cost': round(total_gross, 2),
-            'net_cost': round(total_net, 2),
             'total_credits_applied': round(total_credits, 2),
             'agent_spaces_active': len(spaces),
             'accounts_active': len(set(s['account_id'] for s in spaces.values())),

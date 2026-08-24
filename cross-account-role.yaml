@@ -81,7 +81,10 @@ Resources:
               - Effect: Allow
                 Action:
                   - glue:GetTable
+                  - glue:GetTables
                   - glue:GetDatabase
+                  - glue:GetDatabases
+                  - glue:GetPartition
                   - glue:GetPartitions
                 Resource:
                   - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog'
