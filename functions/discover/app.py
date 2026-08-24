@@ -25,7 +25,11 @@ def handler(event, context):
     """Lambda entry point — discover agent roles by trust policy."""
     iam = boto3.client('iam')
 
-    # Manual overrides take precedence
+    # Manual role ARNs AUGMENT auto-discovery — they never replace it. Discovery
+    # always provides full coverage; manual entries only add roles discovery
+    # couldn't find (e.g. custom-named roles). This guarantees audit scope is
+    # always >= auto-discovered, so a manual entry can never silently narrow
+    # coverage — the right default for an org-wide governance audit.
     manual_arns = [a.strip() for a in os.environ.get('AGENT_ROLE_ARNS', '').split(',') if a.strip()]
 
     # Auto-discover roles trusting aidevops.amazonaws.com
@@ -57,18 +61,23 @@ def handler(event, context):
     webapp_roles = [r for r in discovered_roles if r['role_type'] == 'webapp']
     other_roles = [r for r in discovered_roles if r['role_type'] == 'custom']
 
+    # Union of auto-discovered audit targets + manual additions, de-duplicated
+    # while preserving order (discovered first, then any extra manual ARNs).
+    auto_targets = [r['role_arn'] for r in agent_space_roles + other_roles]
+    audit_targets = list(dict.fromkeys(auto_targets + manual_arns))
+
     result = {
         'discovered_roles': len(discovered_roles),
         'agent_space_roles': [r['role_arn'] for r in agent_space_roles],
         'webapp_roles': [r['role_arn'] for r in webapp_roles],
         'custom_roles': [r['role_arn'] for r in other_roles],
-        'manual_overrides': manual_arns,
-        'audit_target_roles': manual_arns if manual_arns else [r['role_arn'] for r in agent_space_roles + other_roles],
+        'manual_additions': manual_arns,
+        'audit_target_roles': audit_targets,
     }
 
-    logger.info("Discovered %d roles (%d agent-space, %d webapp, %d custom). Audit targets: %d",
+    logger.info("Discovered %d roles (%d agent-space, %d webapp, %d custom); %d manual addition(s). Audit targets: %d",
                 len(discovered_roles), len(agent_space_roles), len(webapp_roles),
-                len(other_roles), len(result['audit_target_roles']))
+                len(other_roles), len(manual_arns), len(result['audit_target_roles']))
 
     return result
 

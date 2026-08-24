@@ -1365,7 +1365,7 @@ Recommended (uses your own AWS access, no expiry):
   aws s3 cp s3://{RESULTS_BUCKET}/{s3_key} ./report.html && open report.html
 
 Temporary direct link (valid 8 hours):
-  <{presigned_url}>
+  {presigned_url}
 
 ---
 AuditTheAgent — AI Agent Governance for Enterprise

@@ -18,7 +18,7 @@ Parameters:
   AgentRoleArns:
     Type: CommaDelimitedList
     Default: ''
-    Description: '[OPTIONAL — auto-discovered if empty] Comma-separated IAM role ARNs used by agents. Leave empty to auto-discover.'
+    Description: '[OPTIONAL — auto-discovered if empty] Additional agent IAM role ARNs to audit (Trust Posture + activity attribution). These ADD TO auto-discovery — they never replace or narrow it, so coverage is always at least what is auto-discovered. Set only to include roles discovery cannot find; leave empty for full auto-discovery.'
   BedrockModelId:
     Type: String
     Default: us.anthropic.claude-sonnet-4-6
@@ -386,3 +386,9 @@ Outputs:
     Value: !Ref ResultsBucket
   ReportTopicArn:
     Value: !Ref ReportTopic
+  EnrichRoleArn:
+    Description: >
+      Enrich Lambda execution role ARN. Pass this as the TrustedRoleArn parameter
+      when deploying cross-account-role.yaml in the CUR account, so the CUR role
+      trusts this exact role (no stack-name dependency).
+    Value: !GetAtt EnrichFunctionRole.Arn

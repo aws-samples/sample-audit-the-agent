@@ -9,6 +9,17 @@ Parameters:
     Type: String
     Description: 12-digit AWS account ID where AuditTheAgent is deployed
 
+  TrustedRoleArn:
+    Type: String
+    Default: ''
+    Description: >
+      RECOMMENDED. The exact ARN of the AuditTheAgent Enrich Lambda execution role
+      that will assume this role (from the main stack's EnrichRoleArn output).
+      When set, only that specific role can assume this role — no dependency on
+      stack naming. Leave empty to fall back to trusting any role matching
+      'agentaudit-*' in the AuditTheAgent account (requires the main stack to be
+      named 'agentaudit').
+
   CurDatabaseName:
     Type: String
     Default: cur_db
@@ -27,6 +38,9 @@ Parameters:
     Default: primary
     Description: Athena workgroup to use for queries
 
+Conditions:
+  HasTrustedRoleArn: !Not [!Equals [!Ref TrustedRoleArn, '']]
+
 Resources:
   AgentAuditCURRole:
     Type: AWS::IAM::Role
@@ -42,7 +56,12 @@ Resources:
             Action: sts:AssumeRole
             Condition:
               StringLike:
-                aws:PrincipalArn: !Sub 'arn:aws:iam::${AgentAuditAccountId}:role/agentaudit-*'
+                # Prefer the exact Enrich role ARN (no stack-name dependency);
+                # fall back to the 'agentaudit-*' pattern when not supplied.
+                aws:PrincipalArn: !If
+                  - HasTrustedRoleArn
+                  - !Ref TrustedRoleArn
+                  - !Sub 'arn:aws:iam::${AgentAuditAccountId}:role/agentaudit-*'
       Policies:
         - PolicyName: AthenaQueryExecution
           PolicyDocument:

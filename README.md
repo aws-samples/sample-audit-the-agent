@@ -25,6 +25,10 @@ It's a serverless pipeline (Step Functions + Lambda) that runs on a schedule and
 ### Prerequisites
 
 - AWS SAM CLI installed
+- **To build:** either **Docker** running (then `sam build --use-container` —
+  recommended, builds against the real Lambda runtime), or a local **Python 3.12
+  with pip** (`python3.12 -m ensurepip --upgrade` if pip is missing). `sam build`
+  matches the `python3.12` Lambda runtime, so a host without it fails validation.
 - AWS account with **DevOps Agent** or **Security Agent** active
 - Permission to create IAM roles when you deploy (an admin role, or one with
   `iam:CreateRole`, `iam:GetRole`, `iam:PutRolePolicy`). The stack creates
@@ -34,7 +38,10 @@ It's a serverless pipeline (Step Functions + Lambda) that runs on a schedule and
   runs without it — but CUR unlocks the richest cost insights: per-space and
   per-operation attribution plus credit-burn tracking. The Enterprise Support
   charge behind the credit budget is read from CUR automatically; no separate
-  input needed.
+  input needed. The CUR parameters are all-or-nothing: provide `CurDatabase`,
+  `CurTable`, `CurSourceBucket`, and `AthenaOutputBucket` together to enable CUR,
+  or leave them all empty to fall back to Cost Explorer. Partial configuration
+  will not work.
 
 ### Deploy
 
@@ -101,7 +108,7 @@ column tells you whether to supply a value or just press Enter.
 | `ScheduleExpression` | `rate(1 day)` | Optional | Report frequency (EventBridge schedule). |
 | `AthenaWorkgroup` | `primary` | Optional | Athena workgroup for CUR queries. |
 | `EnableUrlShortening` | `false` | Optional | Opt-in TinyURL shortening for presigned report URLs (sends URL to a third party). |
-| `AgentRoleArns` | — | Optional (auto-discovered) | Agent IAM role ARNs. Leave empty to auto-discover. |
+| `AgentRoleArns` | — | Optional (auto-discovered) | Additional agent IAM role ARNs to audit. **Adds to** auto-discovery — never narrows it. Leave empty for full auto-discovery. |
 | `VendedLogGroup` | — | Optional (auto-discovered) | **DevOps Agent** vended-log group. Leave empty to auto-discover. |
 | `MonthlyESCharge` | `0` | Optional (fallback) | Fallback ES charge for credit tracking; auto-derived from CUR when available. |
 | `CurCrossAccountRoleArn` | — | Optional (advanced) | IAM role ARN in the CUR account for cross-account queries (see below). |
@@ -113,9 +120,17 @@ column tells you whether to supply a value or just press Enter.
 
 ### Cross-Account CUR Setup
 
-Most enterprises keep CUR in the **payer/management account** while agents run in linked accounts. To enable cross-account cost queries, deploy the included `cross-account-role.yaml` in the account where CUR/Athena lives — it creates a read-only role AuditTheAgent can assume.
+Most enterprises keep CUR in the **payer/management account** while agents run in linked accounts. To enable cross-account cost queries, deploy the included `cross-account-role.yaml` in the CUR account — it creates a read-only role the Enrich Lambda assumes.
 
-**Deploy in your CUR account:**
+The two accounts are linked by the **Enrich role ARN**, not by stack naming, so you can name your stacks anything:
+
+**1. Deploy the main stack first** (in the AuditTheAgent account) and note its `EnrichRoleArn` output:
+```bash
+aws cloudformation describe-stacks --stack-name agentaudit \
+  --query 'Stacks[0].Outputs[?OutputKey==`EnrichRoleArn`].OutputValue' --output text
+```
+
+**2. Deploy the role in your CUR account,** passing that ARN as `TrustedRoleArn`:
 ```bash
 aws cloudformation deploy \
   --template-file cross-account-role.yaml \
@@ -123,27 +138,30 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides \
     AgentAuditAccountId=<ACCOUNT_WHERE_AGENTAUDIT_RUNS> \
+    TrustedRoleArn=<ENRICH_ROLE_ARN_FROM_STEP_1> \
     CurDatabaseName=<YOUR_CUR_DATABASE> \
     CurSourceBucketName=<YOUR_CUR_S3_BUCKET> \
     AthenaOutputBucketName=<YOUR_ATHENA_RESULTS_BUCKET>
 ```
-
-Then re-feed the role ARN into AuditTheAgent. First grab it from the stack output:
-
+Then grab the role ARN it created:
 ```bash
 aws cloudformation describe-stacks --stack-name agentaudit-cur-access \
   --query 'Stacks[0].Outputs[?OutputKey==`RoleArn`].OutputValue' --output text
 ```
 
-Then re-run guided deploy in your AuditTheAgent account and set `CurCrossAccountRoleArn` to that ARN (along with `CurDatabase` / `CurTable`) when prompted:
-
+**3. Re-deploy the main stack** with `CurCrossAccountRoleArn` set to that ARN (plus `CurDatabase` / `CurTable`):
 ```bash
 sam deploy --guided
 ```
 
-The Enrich Lambda then assumes this role to query CUR cross-account; leave the parameter empty and it queries Athena in its own account instead. The role is read-only (Athena + Glue + CUR bucket), and its trust policy only allows AuditTheAgent's own roles in your account to assume it.
+The Enrich Lambda then assumes this role to query CUR cross-account; leave `CurCrossAccountRoleArn` empty and it queries Athena in its own account instead. The role is read-only (Athena + Glue + CUR bucket).
 
-> Use `--guided` (or edit `samconfig.toml`) for the re-feed rather than
+> `TrustedRoleArn` scopes the trust to that one Enrich role — the most
+> least-privilege option and independent of stack names. If you leave
+> `TrustedRoleArn` empty, the role falls back to trusting any `agentaudit-*` role
+> in the account, which then requires the main stack to be named `agentaudit`.
+
+> Use `--guided` (or edit `samconfig.toml`) for the re-deploy rather than
 > `--parameter-overrides` — the shorthand splits on spaces and can truncate other
 > parameters like `rate(1 day)`.
 
@@ -186,6 +204,59 @@ python3 -m pytest tests/ -v
 ```
 
 127 tests covering: trigger classification, CloudTrail parsing, CUR partition logic, credit consumption math, guardrail filters, HTML generation, XSS prevention.
+
+## Troubleshooting
+
+### Build
+
+**`PythonPipBuilder:Validation - Binary validation failed for python`** — the
+build host has no `python3.12` matching the Lambda runtime. Install Python 3.12,
+or build in a container: `sam build --use-container` (needs Docker).
+
+**`PythonPipBuilder:ResolveDependencies - Failed to find a Python runtime containing pip`** —
+Python 3.12 is present but pip isn't wired to it. Bootstrap it with
+`python3.12 -m ensurepip --upgrade`, or build in a container.
+
+**`Container creation failed: No such image ...` / `no space left on device`** —
+the SAM build image couldn't be pulled/extracted (often low disk on Cloud9).
+Free space (`docker system prune -af`, `rm -rf .aws-sam`) or use the host build
+(`sam build` after the pip bootstrap above) which pulls no image.
+
+### Deploy
+
+**`AccessDenied` on the function roles** — your deploy identity can't create IAM
+roles. Use a role with `iam:CreateRole` / `iam:GetRole` / `iam:PutRolePolicy`
+(see Prerequisites).
+
+**A parameter like `rate(1 day)` gets truncated** — you used
+`--parameter-overrides`, which splits on spaces. Use `sam deploy --guided` or
+edit `samconfig.toml`.
+
+### Runtime
+
+**Where to find logs** — each Lambda logs to `/aws/lambda/<stack>-<Function>-*`,
+e.g. for stack `agentaudit`: `agentaudit-EnrichFunction-*`,
+`agentaudit-CollectFunction-*`, `agentaudit-ComplianceFunction-*`,
+`agentaudit-AnalyzeFunction-*`, `agentaudit-ReportFunction-*` (also Discover,
+Aggregate, Feedback). The pipeline itself: Console → Step Functions →
+`agentaudit-pipeline` → Executions.
+
+**Report shows "No agent-space cost recorded" / "Credit tracking not configured"** —
+usually expected when CUR isn't configured, the account has little agent spend,
+or CUR data hasn't landed yet (CUR has ~24h latency). Confirm all four CUR
+parameters are set (they're all-or-nothing) and, for cross-account, that the
+Enrich role successfully assumed the CUR role (grep the Enrich log for
+`cross-account`).
+
+**Cross-account CUR fails with AssumeRole `AccessDenied`** — the CUR role's trust
+doesn't allow the Enrich role. Pass the main stack's `EnrichRoleArn` output as
+`TrustedRoleArn` when deploying `cross-account-role.yaml` (see Cross-Account CUR
+Setup). If the CUR data or Glue database is Lake Formation-managed, also grant
+the role access in Lake Formation.
+
+**Bedrock `ValidationException: model not enabled` / `AccessDenied`** — enable the
+model in the Bedrock console → Model Access (default
+`us.anthropic.claude-sonnet-4-6`).
 
 ## Security
 
