@@ -203,7 +203,7 @@ pip install -r requirements-dev.txt
 python3 -m pytest tests/ -v
 ```
 
-127 tests covering: trigger classification, CloudTrail parsing, CUR partition logic, credit consumption math, guardrail filters, HTML generation, XSS prevention.
+130 tests covering: trigger classification, CloudTrail parsing, CUR partition logic, credit consumption math, guardrail filters, HTML generation, XSS prevention.
 
 ## Troubleshooting
 
@@ -267,13 +267,26 @@ model in the Bedrock console → Model Access (default
 
 ## Cost
 
-Rough estimate, ~$1-3 per daily report (based on AWS public pricing as of August 2026, us-east-1; actual costs vary by region, usage, and data volume):
-- Bedrock invocation: ~$0.01-0.05
-- Athena queries: ~$0.01 (CUR scans)
-- Lambda: ~$0.01 (8 functions, <30s each)
-- S3/SNS: negligible
+AuditTheAgent runs serverlessly for **roughly $1–$5/month** on the default daily schedule. The only meaningful cost is a single Amazon Bedrock summary call per run — every other component falls within or near the AWS Free Tier. Prices below are AWS public on-demand pricing (August 2026, `us-east-1`); actual costs vary by region, model, schedule, and data volume.
 
-For estimates specific to your usage, see the [AWS Pricing Calculator](https://calculator.aws/).
+**Per report run** (default = 1/day → ~30 runs/month):
+
+| Component | Role | Est. per run |
+|-----------|------|--------------|
+| Amazon Bedrock | 1 Claude Sonnet call for the executive summary | ~$0.03–0.12 |
+| AWS Lambda | 8 short functions (512 MB, seconds each) | ~$0.00 (free tier) |
+| Step Functions (Standard) | ~8–10 state transitions | ~$0.00 (free tier) |
+| Athena | CUR cost queries (only if cost enrichment enabled) | ~$0.00–0.02 |
+| S3 / SNS / CloudWatch Logs | Report storage, email, logs | negligible |
+
+**Monthly total: ~$1–$5** (dominated by Bedrock). A brand-new account often sees near-$0 for everything except Bedrock (Bedrock has no perpetual free tier).
+
+**What moves the cost:**
+- **Bedrock model** (biggest lever) — the default is Claude Sonnet. Set `BedrockModelId` to a smaller model (e.g. Claude Haiku) to cut LLM cost ~5–10× (total well under $1/month), or a larger model for higher-quality narratives.
+- **Schedule frequency** — `ScheduleExpression` default is `rate(1 day)`. Hourly (`rate(1 hour)`) multiplies the Bedrock cost ~24× (~$30–$100/month range).
+- **Cost enrichment (CUR/Athena)** — enabling the CUR path adds a small per-scan Athena charge; queries hit partitioned data so this is typically cents/month.
+
+For an estimate specific to your usage, see the [AWS Pricing Calculator](https://calculator.aws/). Once deployed, the tool's own credit-tracking (or Cost Explorer filtered to `agentaudit-*` resources) shows real spend after a few days.
 
 ## Project Structure
 
@@ -289,7 +302,7 @@ sample-audit-the-agent/
 │   ├── report/          HTML dashboard + SNS + S3
 │   └── feedback/        Reviewed-CSV ingestion (suppressions)
 ├── statemachine/        Step Functions ASL definition
-├── tests/               127 pytest tests
+├── tests/               130 pytest tests
 ├── template.yaml        SAM/CloudFormation template
 ├── cross-account-role.yaml   Cross-account CUR read-only role
 └── architecture.png     Architecture diagram
