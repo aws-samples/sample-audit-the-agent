@@ -283,7 +283,7 @@ AuditTheAgent runs serverlessly for **roughly $1–$5/month** on the default dai
 
 **What moves the cost:**
 - **Bedrock model** (biggest lever) — the default is Claude Sonnet. Set `BedrockModelId` to a smaller model (e.g. Claude Haiku) to cut LLM cost ~5–10× (total well under $1/month), or a larger model for higher-quality narratives.
-- **Schedule frequency** — `ScheduleExpression` default is `rate(1 day)`. Hourly (`rate(1 hour)`) multiplies the Bedrock cost ~24× (~$30–$100/month range).
+- **Schedule frequency** — `ScheduleExpression` default is `rate(1 day)` (about 30 runs/month). Running hourly (`rate(1 hour)`) is roughly 24 times as many runs, which scales the Bedrock portion accordingly (into the low tens of dollars per month); the other components stay near Free Tier.
 - **Cost enrichment (CUR/Athena)** — enabling the CUR path adds a small per-scan Athena charge; queries hit partitioned data so this is typically cents/month.
 
 For an estimate specific to your usage, see the [AWS Pricing Calculator](https://calculator.aws/). Once deployed, the tool's own credit-tracking (or Cost Explorer filtered to `agentaudit-*` resources) shows real spend after a few days.
