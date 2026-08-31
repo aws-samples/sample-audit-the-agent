@@ -288,6 +288,28 @@ AuditTheAgent runs serverlessly for **roughly $1–$5/month** on the default dai
 
 For an estimate specific to your usage, see the [AWS Pricing Calculator](https://calculator.aws/). Once deployed, the tool's own credit-tracking (or Cost Explorer filtered to `agentaudit-*` resources) shows real spend after a few days.
 
+## Cleanup
+
+To remove all AuditTheAgent resources and stop all charges:
+
+```bash
+# Empty the S3 bucket first (CloudFormation can't delete non-empty buckets)
+aws s3 rm s3://agentaudit-results-$(aws sts get-caller-identity --query Account --output text) --recursive
+
+# Delete the stack
+sam delete --stack-name agentaudit --no-prompts
+```
+
+This removes: all 8 Lambda functions, Step Functions state machine, IAM roles, S3 bucket, EventBridge schedule, and SNS topic.
+
+If you enabled cross-account CUR, also delete the read-only role stack in your CUR account:
+
+```bash
+aws cloudformation delete-stack --stack-name agentaudit-cur-access
+```
+
+**Note:** AuditTheAgent is read-only and never modifies the agents it audits or their resources, so nothing outside these stacks needs cleanup. Amazon Bedrock model access is enabled at the account level (not created by this stack) and incurs no cost once the stack is removed; leave it or revoke it in the Bedrock console independently.
+
 ## Project Structure
 
 ```
